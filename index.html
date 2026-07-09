@@ -2163,17 +2163,22 @@ function changeStyle(){
   const savedPitch   = map.getPitch();
   const savedBearing = map.getBearing();
 
-  function restoreViewAfterStyleLoad() {
-    map.once('styledata', () => {
-      map.jumpTo({
-        center:  savedCenter,
-        zoom:    savedZoom,
-        pitch:   savedPitch,
-        bearing: savedBearing
-      });
-      // Marker-Overlay neu triggern damit der Puls-Punkt sofort sichtbar bleibt
-      if (markerLL) { startOverlayLoop(); }
+  // Handler-Referenz global speichern, damit doAnimation ihn abbrechen kann
+  if (window._restoreStyleHandler) {
+    map.off('styledata', window._restoreStyleHandler);
+  }
+  window._restoreStyleHandler = () => {
+    window._restoreStyleHandler = null;
+    map.jumpTo({
+      center:  savedCenter,
+      zoom:    savedZoom,
+      pitch:   savedPitch,
+      bearing: savedBearing
     });
+    if (markerLL) { startOverlayLoop(); }
+  };
+  function restoreViewAfterStyleLoad() {
+    map.once('styledata', window._restoreStyleHandler);
   }
 
   if (s === 'mapbox_satellite') {
@@ -2673,13 +2678,12 @@ function approxAltitude(zoom, latDeg) {
 }
 
 function formatAlt(m) {
-  // m ist in Metern. 1 km = 1.000 m — Mio km waere erst ab 1e9 m.
-  if (m > 600000)  return '> 600 km';                                      // jenseits Raumstation
-  if (m >= 100000) return Math.round(m / 1000) + ' km';                    // 100–600 km
-  if (m >= 10000)  return (m / 1000).toFixed(0) + ' km';                   // 10–100 km
-  if (m >= 1000)   return (m / 1000).toFixed(1).replace('.', ',') + ' km'; // 1–10 km
-  if (m >= 100)    return Math.round(m) + ' m';                             // 100–999 m
-  return m.toFixed(0) + ' m';                                               // < 100 m
+  if (m >= 1000000) return (m / 1000000).toFixed(1).replace('.',',') + ' Mio km'; // unlikely
+  if (m >= 100000)  return Math.round(m / 1000) + ' km';
+  if (m >= 10000)   return (m / 1000).toFixed(0) + ' km';
+  if (m >= 1000)    return (m / 1000).toFixed(1).replace('.',',') + ' km';
+  if (m >= 100)     return Math.round(m) + ' m';
+  return m.toFixed(0) + ' m';
 }
 
 function updateAltDisplay() {
@@ -2731,8 +2735,8 @@ function doAnimation(onDone, zoomOffset, onReady){
   zoomOffset = zoomOffset || 0;
   const lat       = parseFloat(document.getElementById('lat').value);
   const lon       = parseFloat(document.getElementById('lon').value);
-  const endZoom   = parseInt(document.getElementById('zoom').value,10)     + zoomOffset;
-  const startZoom = parseInt(document.getElementById('startzoom').value,10) + zoomOffset;
+  const endZoom   = parseFloat(document.getElementById('zoom').value)     + zoomOffset;
+  const startZoom = parseFloat(document.getElementById('startzoom').value) + zoomOffset;
   const dur       = parseFloat(document.getElementById('duration').value)*1000;
   const tilt      = document.getElementById('flightmode').value === 'tilt';
   const pitchBase = tilt ? parseInt(document.getElementById('pitchval').value,10) : 0;
@@ -2746,6 +2750,12 @@ function doAnimation(onDone, zoomOffset, onReady){
 
   setMarker(lat,lon);
   labelTarget=0; labelAlpha=0;
+
+  // Pending style-restore-jumpTo abbrechen – würde sonst flyTo unterbrechen
+  if (window._restoreStyleHandler) {
+    map.off('styledata', window._restoreStyleHandler);
+    window._restoreStyleHandler = null;
+  }
 
   // Reset / remove any leftover satellite layer from previous run
   try { removeSatLayer(); } catch(e){}
